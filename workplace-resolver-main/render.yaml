@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: issueflow-frontend
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm run preview
+    envVars:
+      - key: VITE_API_URL
+        value: https://issueflow-api.onrender.com/api
