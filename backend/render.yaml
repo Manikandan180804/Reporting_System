@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: issueflow-api
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: NODE_ENV
+        value: production
+      - key: MONGO_URI
+        fromDatabase:
+          name: issueflow-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        value: https://issueflow-frontend.onrender.com
+
+databases:
+  - name: issueflow-db
+    databaseName: issueflow
+    plan: free
