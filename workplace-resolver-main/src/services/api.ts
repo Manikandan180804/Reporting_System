@@ -100,6 +100,32 @@ class ApiService {
     });
   }
 
+  async uploadAttachment(incidentId: string, file: File): Promise<{ url: string }> {
+    const url = `${API_BASE_URL}/incidents/${incidentId}/attachments`;
+    const token = localStorage.getItem('token');
+    const form = new FormData();
+    form.append('file', file);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: form,
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`Upload failed: ${text || response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  async getActivity(incidentId: string): Promise<any[]> {
+    return this.request<any[]>(`/incidents/${incidentId}/activity`);
+  }
+
   // Routing rules endpoints
   async getRoutingRules(): Promise<RoutingRule[]> {
     return this.request<RoutingRule[]>('/routing-rules');
@@ -132,6 +158,23 @@ class ApiService {
 
   async getResponders(): Promise<User[]> {
     return this.request<User[]>('/users/responders');
+  }
+
+  async watchIncident(id: string): Promise<Incident> {
+    return this.request<Incident>(`/incidents/${id}/watch`, {
+      method: 'POST',
+    });
+  }
+
+  async assignIncident(id: string, userId: string): Promise<Incident> {
+    return this.request<Incident>(`/incidents/${id}/assign`, {
+      method: 'PATCH',
+      body: JSON.stringify({ assignedTo: userId }),
+    });
+  }
+
+  async getMetrics(): Promise<any> {
+    return this.request<any>('/incidents/metrics', { method: 'GET' });
   }
 }
 

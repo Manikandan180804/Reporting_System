@@ -1,0 +1,127 @@
+import { useEffect, useState } from 'react';
+import { api } from '@/services/api';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+
+export default function SystemMetrics() {
+  const [metrics, setMetrics] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.getMetrics()
+      .then((data) => setMetrics(data))
+      .catch((err) => console.error('Failed to load metrics', err))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div>Loading metrics...</div>;
+  if (!metrics) return <div>No metrics available</div>;
+
+  const colors = {
+    Open: '#ef4444',
+    Investigating: '#eab308',
+    Resolved: '#22c55e',
+    Critical: '#dc2626',
+    High: '#ea580c',
+    Medium: '#eab308',
+    Low: '#3b82f6',
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Total Incidents</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold">{metrics.volume?.length || 0}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Avg Time to Resolve</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold">{(metrics.mttr / 3600).toFixed(1)}h</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Open Incidents</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold">{metrics.byStatus?.find((s: any) => s.status === 'Open')?.count || 0}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Incidents by Status</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={metrics.byStatus || []}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="status" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="count" fill="#3b82f6" radius={[8, 8, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Incidents by Severity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={300}>
+              <PieChart>
+                <Pie
+                  data={metrics.bySeverity || []}
+                  dataKey="count"
+                  nameKey="severity"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={100}
+                  label
+                >
+                  {(metrics.bySeverity || []).map((entry: any) => (
+                    <Cell key={entry.severity} fill={(colors as any)[entry.severity] || '#666'} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </div>
+
+      {metrics.volume && metrics.volume.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Incident Volume Over Time</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={metrics.volume}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="count" stroke="#3b82f6" />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}

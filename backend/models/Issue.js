@@ -51,6 +51,30 @@ const issueSchema = new mongoose.Schema({
       createdAt: { type: Date, default: Date.now },
     }
   ],
+  attachments: [
+    {
+      url: String,
+      filename: String,
+      uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      uploadedAt: { type: Date, default: Date.now },
+    }
+  ],
+  activity: [
+    {
+      type: { type: String },
+      message: String,
+      by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      byName: String,
+      at: { type: Date, default: Date.now },
+      meta: mongoose.Schema.Types.Mixed,
+    }
+  ],
+  watchers: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    }
+  ],
 }, {
   timestamps: true,
 });
