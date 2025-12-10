@@ -7,7 +7,7 @@ const User = require('../models/User');
 // @desc    Register a new user
 // @access  Public
 router.post('/', async (req, res) => {
-  const { name, email, password } = req.body;
+  const { name, email, password, role } = req.body;
 
   try {
     const userExists = await User.findOne({ email });
@@ -19,7 +19,7 @@ router.post('/', async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    const user = new User({ name, email, password: hashedPassword });
+    const user = new User({ name, email, password: hashedPassword, role: role || 'employee' });
     await user.save();
 
     res.status(201).json({ message: 'User registered successfully', user });
@@ -86,7 +86,7 @@ router.get('/', protect, async (req, res) => {
 // @desc    Register a new user via signup route
 // @access  Public
 router.post('/signup', async (req, res) => {
-  const { name, email, password } = req.body;
+  const { name, email, password, role } = req.body;
 
   try {
     const userExists = await User.findOne({ email });
@@ -97,7 +97,7 @@ router.post('/signup', async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    const user = new User({ name, email, password: hashedPassword });
+    const user = new User({ name, email, password: hashedPassword, role: role || 'employee' });
     await user.save();
 
     // Return token for immediate login after signup

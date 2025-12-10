@@ -4,6 +4,8 @@ const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
+const http = require('http');
+const path = require('path');
 
 // Middleware - ensure these are registered before routes so req.body is available
 app.use(cors());
@@ -49,6 +51,20 @@ app.get('/', (req, res) => {
   res.send('IssueFlow API is running...');
 });
 
-// Start Server
+// Start Server (create HTTP server so Socket.IO can hook in)
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+const server = http.createServer(app);
+
+// initialize socket (if available)
+try {
+  const socketHelper = require('./socket');
+  const io = socketHelper.init(server);
+  if (io) console.log('🔌 Socket.IO initialized');
+} catch (err) {
+  console.warn('Socket init failed', err);
+}
+
+// serve uploaded files
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

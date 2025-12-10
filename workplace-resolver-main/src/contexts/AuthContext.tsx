@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 import { User } from '@/types';
 import { api } from '@/services/api';
 import { useToast } from '@/hooks/use-toast';
+import { connectSocket, on as socketOn } from '@/services/socket';
 
 interface AuthContextType {
   user: User | null;
@@ -23,7 +24,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const token = localStorage.getItem('token');
     if (token) {
       api.getCurrentUser()
-        .then(setUser)
+        .then(async (u) => {
+          setUser(u);
+          // connect socket if available
+          const sock = await connectSocket();
+          if (sock) {
+            socketOn('incident:updated', (payload: any) => {
+              window.dispatchEvent(new CustomEvent('socket:incident.updated', { detail: payload }));
+            });
+            socketOn('comment:added', (payload: any) => {
+              window.dispatchEvent(new CustomEvent('socket:comment.added', { detail: payload }));
+            });
+            socketOn('incident:assigned', (payload: any) => {
+              window.dispatchEvent(new CustomEvent('socket:incident.assigned', { detail: payload }));
+            });
+          }
+        })
         .catch(() => {
           localStorage.removeItem('token');
         })
@@ -42,6 +58,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         title: 'Login successful',
         description: `Welcome back, ${response.user.name}!`,
       });
+      // connect socket after login
+      connectSocket().then((sock) => {
+        if (sock) {
+          socketOn('incident:updated', (payload: any) => {
+            window.dispatchEvent(new CustomEvent('socket:incident.updated', { detail: payload }));
+          });
+          socketOn('comment:added', (payload: any) => {
+            window.dispatchEvent(new CustomEvent('socket:comment.added', { detail: payload }));
+          });
+          socketOn('incident:assigned', (payload: any) => {
+            window.dispatchEvent(new CustomEvent('socket:incident.assigned', { detail: payload }));
+          });
+        }
+      }).catch(() => {});
     } catch (error) {
       toast({
         title: 'Login failed',
