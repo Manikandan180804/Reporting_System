@@ -1,26 +1,64 @@
 import { useState, useEffect } from 'react';
 import { api } from '@/services/api';
-import { Incident } from '@/types';
+import { Incident, User } from '@/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import IncidentDetailDrawer from '@/components/incidents/IncidentDetailDrawer';
+import useAssignedIncidentsPoll from '@/hooks/useAssignedIncidentsPoll';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, MoreVertical, Check, Clock } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useToast } from '@/hooks/use-toast';
 
 export default function ResponderDashboard() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerIncidentId, setDrawerIncidentId] = useState<string | null>(null);
   const [newStatus, setNewStatus] = useState('');
   const [comment, setComment] = useState('');
   const [loading, setLoading] = useState(true);
+  const [responders, setResponders] = useState<User[]>([]);
   const { toast } = useToast();
 
   useEffect(() => {
     loadIncidents();
+    loadResponders();
+  }, []);
+
+  const loadResponders = async () => {
+    try {
+      const data = await api.getResponders();
+      setResponders(data);
+    } catch (err) {
+      console.error('Failed to load responders', err);
+    }
+  };
+
+  // Poll assigned incidents and update list when there are changes
+  useAssignedIncidentsPoll((data) => {
+    setIncidents(data);
+  });
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      // any incident update should refresh the assigned incidents list
+      loadIncidents();
+    };
+
+    window.addEventListener('socket:incident.updated', handler as EventListener);
+    window.addEventListener('socket:incident.assigned', handler as EventListener);
+    window.addEventListener('socket:comment.added', handler as EventListener);
+
+    return () => {
+      window.removeEventListener('socket:incident.updated', handler as EventListener);
+      window.removeEventListener('socket:incident.assigned', handler as EventListener);
+      window.removeEventListener('socket:comment.added', handler as EventListener);
+    };
   }, []);
 
   const loadIncidents = async () => {
@@ -103,14 +141,31 @@ export default function ResponderDashboard() {
                   className={`cursor-pointer transition-all hover:shadow-md ${
                     selectedIncident?._id === incident._id ? 'ring-2 ring-primary' : ''
                   }`}
-                  onClick={() => setSelectedIncident(incident)}
+                  onClick={() => { setSelectedIncident(incident); setDrawerIncidentId(incident._id); setDrawerOpen(true); }}
                 >
                   <CardHeader>
                     <div className="flex items-start justify-between gap-2">
                       <CardTitle className="text-lg">{incident.title}</CardTitle>
-                      <Badge variant="outline" className={getStatusColor(incident.status)}>
-                        {incident.status}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className={getStatusColor(incident.status)}>
+                          {incident.status}
+                        </Badge>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); api.updateIncidentStatus(incident._id, 'Investigating').then(() => loadIncidents()).catch(() => toast({ title: 'Error', description: 'Failed to update status', variant: 'destructive' })); }}>
+                              <Clock className="mr-2 h-4 w-4" /> Mark Investigating
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); api.updateIncidentStatus(incident._id, 'Resolved').then(() => loadIncidents()).catch(() => toast({ title: 'Error', description: 'Failed to update status', variant: 'destructive' })); }}>
+                              <Check className="mr-2 h-4 w-4" /> Mark Resolved
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     </div>
                     <CardDescription>{incident.description}</CardDescription>
                   </CardHeader>
@@ -220,6 +275,13 @@ export default function ResponderDashboard() {
           </div>
         )}
       </div>
+
+      <IncidentDetailDrawer
+        incidentId={drawerIncidentId}
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+        onUpdated={loadIncidents}
+      />
     </DashboardLayout>
   );
 }

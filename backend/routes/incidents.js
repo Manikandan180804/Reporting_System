@@ -4,6 +4,26 @@ const Incident = require('../models/Issue');
 const RoutingRule = require('../models/RoutingRule');
 const protect = require('../middleware/authMiddleware');
 const User = require('../models/User');
+const socketHelper = require('../socket');
+const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
+
+// ensure uploads dir exists
+const uploadsDir = path.join(__dirname, '..', 'uploads');
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadsDir);
+  },
+  filename: function (req, file, cb) {
+    const unique = `${Date.now()}-${file.originalname}`;
+    cb(null, unique);
+  }
+});
+
+const upload = multer({ storage });
 
 // Create incident (employees)
 router.post('/', protect, async (req, res) => {
@@ -47,8 +67,18 @@ router.post('/', protect, async (req, res) => {
       },
     ];
 
+    // add activity entry for creation
+    incident.activity = incident.activity || [];
+    incident.activity.push({ type: 'created', message: 'Incident created', by: req.user.userId, byName: reporter ? reporter.name : undefined, at: new Date() });
     await incident.save();
-    res.status(201).json({ message: 'Incident created', incident });
+
+    // emit socket event if available
+    try {
+      const io = socketHelper.getIO();
+      if (io) io.emit('incident:created', incident);
+    } catch (e) {}
+
+    res.status(201).json(incident);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error });
   }
@@ -98,8 +128,16 @@ router.patch('/:id/status', protect, async (req, res) => {
       changedAt: new Date(),
     });
     incident.status = status;
+    incident.activity = incident.activity || [];
+    incident.activity.push({ type: 'status', message: `Status changed to ${status}`, by: req.user.userId, byName: user ? user.name : undefined, at: new Date(), meta: { status } });
     await incident.save();
-    res.status(200).json({ message: 'Status updated', incident });
+
+    try {
+      const io = socketHelper.getIO();
+      if (io) io.emit('incident:updated', incident);
+    } catch (e) {}
+
+    res.status(200).json(incident);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error });
   }
@@ -132,11 +170,129 @@ router.post('/:id/comments', protect, async (req, res) => {
     const user = await User.findById(req.user.userId);
     const incident = await Incident.findById(req.params.id);
     if (!incident) return res.status(404).json({ message: 'Incident not found' });
-    incident.comments.push({ text, createdBy: req.user.userId, name: user ? user.name : undefined });
+    const comment = { text, createdBy: req.user.userId, name: user ? user.name : undefined, createdAt: new Date() };
+    incident.comments.push(comment);
+    incident.activity = incident.activity || [];
+    incident.activity.push({ type: 'comment', message: `${user ? user.name : 'Someone'} commented`, by: req.user.userId, byName: user ? user.name : undefined, at: new Date(), meta: { text } });
     await incident.save();
-    res.status(201).json({ message: 'Comment added', incident });
+
+    try {
+      const io = socketHelper.getIO();
+      if (io) io.emit('comment:added', { incidentId: incident._id, comment });
+    } catch (e) {}
+
+    res.status(201).json(incident);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error });
+  }
+});
+
+// Upload attachment to an incident
+router.post('/:id/attachments', protect, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
+    const incident = await Incident.findById(req.params.id);
+    if (!incident) return res.status(404).json({ message: 'Incident not found' });
+    const user = await User.findById(req.user.userId);
+    const fileUrl = `/uploads/${req.file.filename}`;
+    incident.attachments = incident.attachments || [];
+    incident.attachments.push({ url: fileUrl, filename: req.file.originalname, uploadedBy: req.user.userId, uploadedAt: new Date() });
+    incident.activity = incident.activity || [];
+    incident.activity.push({ type: 'attachment', message: `Attachment uploaded: ${req.file.originalname}`, by: req.user.userId, byName: user ? user.name : undefined, at: new Date(), meta: { filename: req.file.originalname, url: fileUrl } });
+    await incident.save();
+
+    try {
+      const io = socketHelper.getIO();
+      if (io) io.emit('incident:updated', incident);
+    } catch (e) {}
+
+    res.status(201).json({ url: fileUrl, filename: req.file.originalname });
+  } catch (err) {
+    console.error('Attachment upload error', err);
+    res.status(500).json({ message: 'Upload failed' });
+  }
+});
+
+// Watch/follow an incident
+router.post('/:id/watch', protect, async (req, res) => {
+  try {
+    const incident = await Incident.findById(req.params.id);
+    if (!incident) return res.status(404).json({ message: 'Incident not found' });
+    const user = await User.findById(req.user.userId);
+    incident.watchers = incident.watchers || [];
+    if (!incident.watchers.includes(req.user.userId)) {
+      incident.watchers.push(req.user.userId);
+    }
+    incident.activity = incident.activity || [];
+    incident.activity.push({ type: 'watch', message: `${user?.name} is watching`, by: req.user.userId, byName: user?.name, at: new Date() });
+    await incident.save();
+    res.status(200).json(incident);
+  } catch (err) {
+    console.error('Watch error', err);
+    res.status(500).json({ message: 'Watch failed' });
+  }
+});
+
+// Assign incident
+router.patch('/:id/assign', protect, async (req, res) => {
+  try {
+    const { assignedTo } = req.body;
+    const incident = await Incident.findById(req.params.id);
+    if (!incident) return res.status(404).json({ message: 'Incident not found' });
+    const assignee = await User.findById(assignedTo);
+    const assigner = await User.findById(req.user.userId);
+    incident.assignedTo = assignedTo;
+    incident.assigneeName = assignee?.name;
+    incident.activity = incident.activity || [];
+    incident.activity.push({ type: 'assign', message: `Assigned to ${assignee?.name}`, by: req.user.userId, byName: assigner?.name, at: new Date(), meta: { assignedTo } });
+    await incident.save();
+
+    try {
+      const io = socketHelper.getIO();
+      if (io) io.emit('incident:assigned', incident);
+    } catch (e) {}
+
+    res.status(200).json(incident);
+  } catch (err) {
+    console.error('Assign error', err);
+    res.status(500).json({ message: 'Assign failed' });
+  }
+});
+
+// Get metrics
+router.get('/metrics', protect, async (req, res) => {
+  try {
+    const incidents = await Incident.find();
+    const volume = [];
+    const byStatus = {};
+    const bySeverity = {};
+
+    incidents.forEach((inc) => {
+      byStatus[inc.status] = (byStatus[inc.status] || 0) + 1;
+      bySeverity[inc.severity] = (bySeverity[inc.severity] || 0) + 1;
+      const dateStr = new Date(inc.createdAt).toLocaleDateString();
+      const idx = volume.findIndex((v) => v.date === dateStr);
+      if (idx >= 0) volume[idx].count++;
+      else volume.push({ date: dateStr, count: 1 });
+    });
+
+    const mttr = incidents
+      .filter((i) => i.status === 'Resolved')
+      .reduce((sum, i) => {
+        const resolved = i.statusHistory?.find((h) => h.toStatus === 'Resolved');
+        if (resolved) return sum + (new Date(resolved.changedAt).getTime() - new Date(i.createdAt).getTime());
+        return sum;
+      }, 0) / Math.max(incidents.filter((i) => i.status === 'Resolved').length, 1);
+
+    res.status(200).json({
+      volume: volume.slice(-7),
+      mttr: mttr || 0,
+      byStatus: Object.entries(byStatus).map(([status, count]) => ({ status, count })),
+      bySeverity: Object.entries(bySeverity).map(([severity, count]) => ({ severity, count })),
+    });
+  } catch (err) {
+    console.error('Metrics error', err);
+    res.status(500).json({ message: 'Metrics failed' });
   }
 });
 

@@ -25,6 +25,7 @@ export default function CreateIncidentDialog({ open, onOpenChange, onSuccess }: 
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('');
   const [severity, setSeverity] = useState('');
+  const [files, setFiles] = useState<FileList | null>(null);
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
@@ -33,12 +34,24 @@ export default function CreateIncidentDialog({ open, onOpenChange, onSuccess }: 
     setLoading(true);
 
     try {
-      await api.createIncident({
+      const created = await api.createIncident({
         title,
         description,
         category: category as any,
         severity: severity as any,
       });
+
+      // Upload any selected files after incident creation
+      if (files && files.length > 0) {
+        for (let i = 0; i < files.length; i++) {
+          const f = files[i];
+          try {
+            await api.uploadAttachment(created._id, f);
+          } catch (err) {
+            console.error('Attachment upload failed', err);
+          }
+        }
+      }
 
       toast({
         title: 'Success',
@@ -49,6 +62,7 @@ export default function CreateIncidentDialog({ open, onOpenChange, onSuccess }: 
       setDescription('');
       setCategory('');
       setSeverity('');
+      setFiles(null);
       onOpenChange(false);
       onSuccess();
     } catch (error) {
@@ -122,6 +136,24 @@ export default function CreateIncidentDialog({ open, onOpenChange, onSuccess }: 
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="attachments">Attachments (optional)</Label>
+            <input
+              id="attachments"
+              type="file"
+              multiple
+              onChange={(e) => setFiles(e.target.files)}
+              className="text-sm"
+            />
+            {files && files.length > 0 && (
+              <div className="text-xs text-muted-foreground mt-1">
+                {Array.from(files).map((f, idx) => (
+                  <div key={idx}>{f.name}</div>
+                ))}
+              </div>
+            )}
           </div>
 
           <Button type="submit" className="w-full" disabled={loading}>
