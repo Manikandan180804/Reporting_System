@@ -143,6 +143,7 @@ export default function CreateIncidentDialog({ open, onOpenChange, onSuccess }: 
     }
   };
 
+  return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -275,3 +276,5 @@ export default function CreateIncidentDialog({ open, onOpenChange, onSuccess }: 
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
