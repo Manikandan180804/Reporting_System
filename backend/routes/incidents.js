@@ -5,6 +5,7 @@ const RoutingRule = require('../models/RoutingRule');
 const protect = require('../middleware/authMiddleware');
 const User = require('../models/User');
 const socketHelper = require('../socket');
+const aiService = require('../services/aiService');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
@@ -25,24 +26,78 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-// Create incident (employees)
+// Create incident (employees) with AI-powered triage, duplicate detection, and solution suggestions
 router.post('/', protect, async (req, res) => {
   try {
     const { title, description, category, severity } = req.body;
     const reporter = await User.findById(req.user.userId);
 
+    // --- AI INTEGRATION: Predict triage, detect duplicates, suggest solutions ---
+    let aiTriageData = {};
+    let duplicateWarning = null;
+    let suggestedSolutions = [];
+    let anomalyData = {};
+
+    try {
+      // 1. AI-powered triage prediction
+      const triageResult = await aiService.predictTriage({ title, description });
+      aiTriageData = {
+        predictedCategory: triageResult.predictedCategory,
+        predictedSeverity: triageResult.predictedSeverity,
+        triageConfidence: triageResult.confidence,
+        timestamp: new Date(),
+      };
+
+      // 2. Check for duplicates
+      const duplicateCheck = await aiService.findDuplicates({ title, description });
+      if (duplicateCheck.hasDuplicates) {
+        duplicateWarning = {
+          message: duplicateCheck.recommendation,
+          duplicates: duplicateCheck.duplicates,
+        };
+      }
+
+      // 3. Suggest solutions from resolved issues
+      const solutionsResult = await aiService.suggestSolutions({
+        title,
+        description,
+        category: triageResult.predictedCategory || category,
+      });
+      suggestedSolutions = solutionsResult.solutions;
+
+      // 4. Detect anomalies
+      anomalyData = await aiService.detectAnomalies({
+        title,
+        description,
+        category: triageResult.predictedCategory || category,
+        severity: triageResult.predictedSeverity || severity,
+      });
+    } catch (aiErr) {
+      console.warn('[incidents] AI service error:', aiErr.message);
+      // Gracefully degrade if AI service fails
+    }
+
+    // Create incident with AI predictions
     const incident = new Incident({
       title,
       description,
-      category,
-      severity,
+      // Use AI predictions as defaults, fallback to user input
+      category: aiTriageData.predictedCategory || category || 'IT',
+      severity: aiTriageData.predictedSeverity || severity || 'Low',
       reportedBy: req.user.userId,
       reporterName: reporter ? reporter.name : undefined,
+      // Store AI data
+      embedding: aiService._generateEmbedding ? aiService._generateEmbedding(`${title} ${description}`) : [],
+      aiTriageData,
+      anomalyScore: anomalyData.anomalyScore || 0,
+      anomalyFlags: anomalyData.flags || [],
+      isAnomalous: anomalyData.isAnomaly || false,
+      suggestedSolutions,
     });
 
-    // Apply routing rules to assign automatically
+    // Apply routing rules + AI routing
     try {
-      const rule = await RoutingRule.findOne({ category });
+      const rule = await RoutingRule.findOne({ category: incident.category });
       if (rule) {
         incident.assignedTeam = rule.assignedTeam;
         if (rule.assignedTo) {
@@ -50,12 +105,15 @@ router.post('/', protect, async (req, res) => {
           const assignee = await User.findById(rule.assignedTo);
           incident.assigneeName = assignee ? assignee.name : undefined;
         }
+      } else if (aiTriageData.assignedTeam || triageResult?.assignedTeam) {
+        // Fallback to AI routing if no routing rule exists
+        incident.assignedTeam = aiTriageData.assignedTeam || triageResult?.assignedTeam;
       }
     } catch (rErr) {
       console.warn('[incidents] routing rule lookup failed', rErr);
     }
 
-    // initialize status history with creation entry (fromStatus = null -> toStatus = current)
+    // Initialize status history
     incident.statusHistory = [
       {
         fromStatus: null,
@@ -67,19 +125,36 @@ router.post('/', protect, async (req, res) => {
       },
     ];
 
-    // add activity entry for creation
+    // Add activity entry
     incident.activity = incident.activity || [];
-    incident.activity.push({ type: 'created', message: 'Incident created', by: req.user.userId, byName: reporter ? reporter.name : undefined, at: new Date() });
+    incident.activity.push({
+      type: 'created',
+      message: 'Incident created',
+      by: req.user.userId,
+      byName: reporter ? reporter.name : undefined,
+      at: new Date(),
+    });
+
     await incident.save();
 
-    // emit socket event if available
+    // Emit socket event
     try {
       const io = socketHelper.getIO();
       if (io) io.emit('incident:created', incident);
     } catch (e) {}
 
-    res.status(201).json(incident);
+    // Return incident with AI insights
+    res.status(201).json({
+      incident,
+      aiInsights: {
+        triage: aiTriageData,
+        duplicateWarning,
+        suggestedSolutions: suggestedSolutions.slice(0, 3),
+        anomaly: anomalyData.isAnomaly ? anomalyData : null,
+      },
+    });
   } catch (error) {
+    console.error('[incidents POST] error:', error);
     res.status(500).json({ message: 'Server error', error });
   }
 });
@@ -259,6 +334,28 @@ router.patch('/:id/assign', protect, async (req, res) => {
   }
 });
 
+// Check for duplicate incidents (real-time as user types)
+router.post('/check-duplicate', protect, async (req, res) => {
+  try {
+    const { title, description } = req.body;
+
+    if (!title || !description) {
+      return res.status(400).json({ message: 'Title and description required' });
+    }
+
+    const duplicateResult = await aiService.findDuplicates({ title, description });
+
+    res.status(200).json({
+      hasDuplicates: duplicateResult.hasDuplicates,
+      duplicates: duplicateResult.duplicates,
+      recommendation: duplicateResult.recommendation,
+    });
+  } catch (err) {
+    console.error('Duplicate check error', err);
+    res.status(500).json({ message: 'Duplicate check failed' });
+  }
+});
+
 // Get metrics
 router.get('/metrics', protect, async (req, res) => {
   try {
@@ -284,11 +381,25 @@ router.get('/metrics', protect, async (req, res) => {
         return sum;
       }, 0) / Math.max(incidents.filter((i) => i.status === 'Resolved').length, 1);
 
+    // AI forecasting and anomaly detection
+    const forecast = await aiService.forecastTicketVolume(7);
+    const anomalies = incidents.filter((i) => i.isAnomalous).length;
+
     res.status(200).json({
       volume: volume.slice(-7),
       mttr: mttr || 0,
       byStatus: Object.entries(byStatus).map(([status, count]) => ({ status, count })),
       bySeverity: Object.entries(bySeverity).map(([severity, count]) => ({ severity, count })),
+      forecast: {
+        nextDays: forecast.forecast,
+        trend: forecast.trend,
+        avgHistorical: forecast.avgHistoricalVolume,
+        confidence: forecast.confidence,
+      },
+      anomalies: {
+        count: anomalies,
+        percentage: ((anomalies / (incidents.length || 1)) * 100).toFixed(2),
+      },
     });
   } catch (err) {
     console.error('Metrics error', err);
