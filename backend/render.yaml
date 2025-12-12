@@ -12,15 +12,17 @@ services:
       - key: NODE_ENV
         value: production
       - key: MONGO_URI
-        fromDatabase:
-          name: issueflow-db
-          property: connectionString
+        sync: false  # Set this in Render dashboard with your MongoDB Atlas connection string
       - key: JWT_SECRET
         generateValue: true
       - key: CORS_ORIGIN
         value: https://issueflow-frontend.onrender.com
-
-databases:
-  - name: issueflow-db
-    databaseName: issueflow
-    plan: free
+      # HuggingFace AI Configuration
+      - key: HUGGINGFACE_API_KEY
+        sync: false  # Set this in Render dashboard
+      - key: HF_EMBEDDING_MODEL
+        value: sentence-transformers/all-MiniLM-L6-v2
+      - key: HF_CLASSIFICATION_MODEL
+        value: facebook/bart-large-mnli
+      - key: HF_TEXT_GENERATION_MODEL
+        value: mistralai/Mistral-7B-Instruct-v0.2

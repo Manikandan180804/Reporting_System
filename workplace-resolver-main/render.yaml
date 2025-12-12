@@ -1,11 +1,19 @@
 services:
   - type: web
     name: issueflow-frontend
-    env: node
+    env: static
     region: oregon
     plan: free
     buildCommand: npm install && npm run build
-    startCommand: npm run preview
+    staticPublishPath: ./dist
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: no-cache
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
     envVars:
       - key: VITE_API_URL
         value: https://issueflow-api.onrender.com/api
