@@ -36,36 +36,47 @@ router.post('/', protect, async (req, res) => {
     let aiTriageData = {};
     let duplicateWarning = null;
     let suggestedSolutions = [];
+    let aiGeneratedSolutions = [];
     let anomalyData = {};
+    let embedding = [];
 
     try {
-      // 1. AI-powered triage prediction
+      // 1. AI-powered triage prediction (uses HuggingFace zero-shot classification)
       const triageResult = await aiService.predictTriage({ title, description });
       aiTriageData = {
         predictedCategory: triageResult.predictedCategory,
         predictedSeverity: triageResult.predictedSeverity,
+        categoryConfidence: triageResult.categoryConfidence,
+        severityConfidence: triageResult.severityConfidence,
         triageConfidence: triageResult.confidence,
+        assignedTeam: triageResult.assignedTeam,
+        aiPowered: triageResult.aiPowered || false,
         timestamp: new Date(),
       };
 
-      // 2. Check for duplicates
+      // 2. Generate semantic embedding for similarity search
+      embedding = await aiService.generateEmbedding(`${title}. ${description}`);
+
+      // 3. Check for duplicates using semantic similarity
       const duplicateCheck = await aiService.findDuplicates({ title, description });
       if (duplicateCheck.hasDuplicates) {
         duplicateWarning = {
           message: duplicateCheck.recommendation,
           duplicates: duplicateCheck.duplicates,
+          aiPowered: duplicateCheck.aiPowered,
         };
       }
 
-      // 3. Suggest solutions from resolved issues
+      // 4. Suggest solutions from resolved issues + AI generation
       const solutionsResult = await aiService.suggestSolutions({
         title,
         description,
         category: triageResult.predictedCategory || category,
       });
       suggestedSolutions = solutionsResult.solutions;
+      aiGeneratedSolutions = solutionsResult.aiGeneratedSolutions || [];
 
-      // 4. Detect anomalies
+      // 5. Detect anomalies with enhanced AI analysis
       anomalyData = await aiService.detectAnomalies({
         title,
         description,
@@ -74,25 +85,55 @@ router.post('/', protect, async (req, res) => {
       });
     } catch (aiErr) {
       console.warn('[incidents] AI service error:', aiErr.message);
-      // Gracefully degrade if AI service fails
+      // Gracefully degrade if AI service fails - use fallback embedding
+      embedding = aiService._generateEmbedding ? aiService._generateEmbedding(`${title} ${description}`) : [];
     }
+
+    // Normalize category and severity from AI predictions
+    const normalizeSeverity = (severity) => {
+      if (!severity) return 'Low';
+      const normalized = severity.charAt(0).toUpperCase() + severity.slice(1).toLowerCase();
+      const validSeverities = ['Low', 'Medium', 'High', 'Critical'];
+      return validSeverities.includes(normalized) ? normalized : 'Low';
+    };
+
+    const normalizeCategory = (category) => {
+      if (!category) return 'IT';
+      const validCategories = ['IT', 'HR', 'Facility'];
+      return validCategories.includes(category) ? category : 'IT';
+    };
+
+    // Ensure suggestedSolutions maintains object structure
+    const formatSuggestedSolutions = (solutions) => {
+      return solutions
+        .filter(s => s && (s.sourceIssueId || s.sourceTitle || s.solution))
+        .map(s => ({
+          sourceIssueId: s.sourceIssueId || undefined,
+          sourceTitle: s.sourceTitle || 'Suggested Solution',
+          solution: s.solution || (Array.isArray(s.solutions) ? s.solutions[0] : s),
+          steps: Array.isArray(s.steps) ? s.steps : [],
+          similarity: s.similarity || 0,
+          resolution: s.resolution || undefined,
+        }))
+        .slice(0, 5);
+    };
 
     // Create incident with AI predictions
     const incident = new Incident({
       title,
       description,
       // Use AI predictions as defaults, fallback to user input
-      category: aiTriageData.predictedCategory || category || 'IT',
-      severity: aiTriageData.predictedSeverity || severity || 'Low',
+      category: normalizeCategory(aiTriageData.predictedCategory || category),
+      severity: normalizeSeverity(aiTriageData.predictedSeverity || severity),
       reportedBy: req.user.userId,
       reporterName: reporter ? reporter.name : undefined,
       // Store AI data
-      embedding: aiService._generateEmbedding ? aiService._generateEmbedding(`${title} ${description}`) : [],
+      embedding,
       aiTriageData,
       anomalyScore: anomalyData.anomalyScore || 0,
       anomalyFlags: anomalyData.flags || [],
       isAnomalous: anomalyData.isAnomaly || false,
-      suggestedSolutions,
+      suggestedSolutions: formatSuggestedSolutions([...suggestedSolutions, ...aiGeneratedSolutions]),
     });
 
     // Apply routing rules + AI routing
@@ -141,7 +182,7 @@ router.post('/', protect, async (req, res) => {
     try {
       const io = socketHelper.getIO();
       if (io) io.emit('incident:created', incident);
-    } catch (e) {}
+    } catch (e) { }
 
     // Return incident with AI insights
     res.status(201).json({
@@ -210,7 +251,7 @@ router.patch('/:id/status', protect, async (req, res) => {
     try {
       const io = socketHelper.getIO();
       if (io) io.emit('incident:updated', incident);
-    } catch (e) {}
+    } catch (e) { }
 
     res.status(200).json(incident);
   } catch (error) {
@@ -254,7 +295,7 @@ router.post('/:id/comments', protect, async (req, res) => {
     try {
       const io = socketHelper.getIO();
       if (io) io.emit('comment:added', { incidentId: incident._id, comment });
-    } catch (e) {}
+    } catch (e) { }
 
     res.status(201).json(incident);
   } catch (error) {
@@ -279,7 +320,7 @@ router.post('/:id/attachments', protect, upload.single('file'), async (req, res)
     try {
       const io = socketHelper.getIO();
       if (io) io.emit('incident:updated', incident);
-    } catch (e) {}
+    } catch (e) { }
 
     res.status(201).json({ url: fileUrl, filename: req.file.originalname });
   } catch (err) {
@@ -325,7 +366,7 @@ router.patch('/:id/assign', protect, async (req, res) => {
     try {
       const io = socketHelper.getIO();
       if (io) io.emit('incident:assigned', incident);
-    } catch (e) {}
+    } catch (e) { }
 
     res.status(200).json(incident);
   } catch (err) {
@@ -422,6 +463,137 @@ router.get('/:id', protect, async (req, res) => {
     res.status(200).json(incident);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error });
+  }
+});
+
+// ===== AI-POWERED ENDPOINTS =====
+
+// Real-time AI triage prediction (as user types)
+router.post('/ai/predict-triage', protect, async (req, res) => {
+  try {
+    const { title, description } = req.body;
+
+    if (!title && !description) {
+      return res.status(400).json({ message: 'Title or description required' });
+    }
+
+    const triageResult = await aiService.predictTriage({
+      title: title || '',
+      description: description || ''
+    });
+
+    res.status(200).json({
+      success: true,
+      prediction: {
+        category: triageResult.predictedCategory,
+        severity: triageResult.predictedSeverity,
+        categoryConfidence: Math.round((triageResult.categoryConfidence || 0) * 100),
+        severityConfidence: Math.round((triageResult.severityConfidence || 0) * 100),
+        assignedTeam: triageResult.assignedTeam,
+        aiPowered: triageResult.aiPowered,
+      },
+    });
+  } catch (err) {
+    console.error('AI triage prediction error:', err);
+    res.status(500).json({ message: 'AI prediction failed', error: err.message });
+  }
+});
+
+// Generate AI solutions for an incident
+router.post('/ai/generate-solutions', protect, async (req, res) => {
+  try {
+    const { title, description, category } = req.body;
+
+    if (!title || !description) {
+      return res.status(400).json({ message: 'Title and description required' });
+    }
+
+    const solutions = await aiService.generateSolutionSuggestions({
+      title,
+      description,
+      category: category || 'general',
+    });
+
+    res.status(200).json({
+      success: true,
+      solutions,
+      aiPowered: true,
+    });
+  } catch (err) {
+    console.error('AI solution generation error:', err);
+    res.status(500).json({ message: 'Solution generation failed', error: err.message });
+  }
+});
+
+// Summarize an incident description
+router.post('/ai/summarize', protect, async (req, res) => {
+  try {
+    const { text } = req.body;
+
+    if (!text) {
+      return res.status(400).json({ message: 'Text required' });
+    }
+
+    const summary = await aiService.summarizeIncident(text);
+
+    res.status(200).json({
+      success: true,
+      summary,
+      aiPowered: true,
+    });
+  } catch (err) {
+    console.error('AI summarization error:', err);
+    res.status(500).json({ message: 'Summarization failed', error: err.message });
+  }
+});
+
+// Get AI-powered insights for an existing incident
+router.get('/:id/ai-insights', protect, async (req, res) => {
+  try {
+    const incident = await Incident.findById(req.params.id);
+    if (!incident) {
+      return res.status(404).json({ message: 'Incident not found' });
+    }
+
+    // Get similar incidents
+    const duplicates = await aiService.findDuplicates({
+      title: incident.title,
+      description: incident.description,
+    });
+
+    // Get solution suggestions
+    const solutions = await aiService.suggestSolutions({
+      title: incident.title,
+      description: incident.description,
+      category: incident.category,
+    });
+
+    // Get anomaly analysis
+    const anomaly = await aiService.detectAnomalies({
+      title: incident.title,
+      description: incident.description,
+      category: incident.category,
+      severity: incident.severity,
+    });
+
+    res.status(200).json({
+      success: true,
+      insights: {
+        similarIncidents: duplicates.duplicates,
+        hasSimilar: duplicates.hasDuplicates,
+        solutions: solutions.solutions,
+        aiGeneratedSolutions: solutions.aiGeneratedSolutions,
+        hasSolutions: solutions.hasSolutions,
+        anomalyScore: anomaly.anomalyScore,
+        isAnomalous: anomaly.isAnomaly,
+        anomalyFlags: anomaly.flags,
+        recommendation: anomaly.recommendation,
+      },
+      aiPowered: true,
+    });
+  } catch (err) {
+    console.error('AI insights error:', err);
+    res.status(500).json({ message: 'AI insights failed', error: err.message });
   }
 });
 
