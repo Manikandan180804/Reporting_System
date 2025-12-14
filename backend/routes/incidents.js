@@ -40,9 +40,17 @@ router.post('/', protect, async (req, res) => {
     let anomalyData = {};
     let embedding = [];
 
+    // Helper to timeout AI operations (5 seconds max)
+    const withTimeout = (promise, ms = 5000) => {
+      return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('AI timeout')), ms))
+      ]);
+    };
+
     try {
       // 1. AI-powered triage prediction (uses HuggingFace zero-shot classification)
-      const triageResult = await aiService.predictTriage({ title, description });
+      const triageResult = await withTimeout(aiService.predictTriage({ title, description }));
       aiTriageData = {
         predictedCategory: triageResult.predictedCategory,
         predictedSeverity: triageResult.predictedSeverity,
@@ -55,36 +63,12 @@ router.post('/', protect, async (req, res) => {
       };
 
       // 2. Generate semantic embedding for similarity search
-      embedding = await aiService.generateEmbedding(`${title}. ${description}`);
+      embedding = await withTimeout(aiService.generateEmbedding(`${title}. ${description}`));
 
-      // 3. Check for duplicates using semantic similarity
-      const duplicateCheck = await aiService.findDuplicates({ title, description });
-      if (duplicateCheck.hasDuplicates) {
-        duplicateWarning = {
-          message: duplicateCheck.recommendation,
-          duplicates: duplicateCheck.duplicates,
-          aiPowered: duplicateCheck.aiPowered,
-        };
-      }
-
-      // 4. Suggest solutions from resolved issues + AI generation
-      const solutionsResult = await aiService.suggestSolutions({
-        title,
-        description,
-        category: triageResult.predictedCategory || category,
-      });
-      suggestedSolutions = solutionsResult.solutions;
-      aiGeneratedSolutions = solutionsResult.aiGeneratedSolutions || [];
-
-      // 5. Detect anomalies with enhanced AI analysis
-      anomalyData = await aiService.detectAnomalies({
-        title,
-        description,
-        category: triageResult.predictedCategory || category,
-        severity: triageResult.predictedSeverity || severity,
-      });
+      // Skip duplicate detection and solution suggestions for faster response
+      // These can be fetched later via the AI insights endpoint
     } catch (aiErr) {
-      console.warn('[incidents] AI service error:', aiErr.message);
+      console.warn('[incidents] AI service error (using fallback):', aiErr.message);
       // Gracefully degrade if AI service fails - use fallback embedding
       embedding = aiService._generateEmbedding ? aiService._generateEmbedding(`${title} ${description}`) : [];
     }
