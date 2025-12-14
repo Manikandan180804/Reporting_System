@@ -1,6 +1,7 @@
 import { AuthResponse, Comment, Incident, LoginCredentials, RoutingRule, SignupData, User } from '@/types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+// Use environment variable, fallback to production API if not set
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://issueflow-api.onrender.com/api';
 
 class ApiService {
   private getAuthHeader() {

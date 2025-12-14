@@ -8,7 +8,7 @@ export async function connectSocket(namespace = '') {
   if (socket) return socket;
   try {
     const { io } = await import('socket.io-client');
-    const url = (import.meta.env.VITE_API_WS_URL || (import.meta.env.VITE_API_URL || 'http://localhost:5000')) as string;
+    const url = (import.meta.env.VITE_API_WS_URL || (import.meta.env.VITE_API_URL || 'https://issueflow-api.onrender.com')) as string;
     socket = io(url + namespace, { transports: ['websocket'] });
     return socket;
   } catch (err) {
@@ -20,7 +20,7 @@ export async function connectSocket(namespace = '') {
 }
 
 export function on(event: string, handler: (...args: any[]) => void) {
-  if (!socket) return () => {};
+  if (!socket) return () => { };
   socket.on(event, handler);
   return () => socket.off(event, handler);
 }
