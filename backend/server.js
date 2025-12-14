@@ -8,7 +8,14 @@ const http = require('http');
 const path = require('path');
 
 // Middleware - ensure these are registered before routes so req.body is available
-app.use(cors());
+// CORS configuration for production
+const corsOptions = {
+  origin: process.env.CORS_ORIGIN || '*',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+};
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Simple request logger to help diagnose 'failed to fetch' / CORS issues
@@ -37,14 +44,14 @@ app.use('/api/incidents', incidentsRoutes);
 const routingRules = require('./routes/routingRules');
 app.use('/api/routing-rules', routingRules);
 
-console.log('🔍 MONGO_URI:',process.env.MONGO_URI);
+console.log('🔍 MONGO_URI:', process.env.MONGO_URI);
 // MongoDB Connection
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
-.then(() => console.log('✅ MongoDB connected'))
-.catch((err) => console.error('❌ MongoDB connection error:', err));
+  .then(() => console.log('✅ MongoDB connected'))
+  .catch((err) => console.error('❌ MongoDB connection error:', err));
 
 // Test Route
 app.get('/', (req, res) => {
