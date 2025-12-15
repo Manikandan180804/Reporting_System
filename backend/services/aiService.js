@@ -1,39 +1,40 @@
 const Issue = require('../models/Issue');
 const User = require('../models/User');
-const { HfInference } = require('@huggingface/inference');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 /**
  * Enhanced AI Service for intelligent incident management
- * Uses HuggingFace Inference API for real ML capabilities:
- * - Semantic embeddings for duplicate detection
- * - Zero-shot classification for triage
+ * Uses Google Gemini API for real ML capabilities:
+ * - Text embeddings for duplicate detection
+ * - Classification for triage
  * - Text generation for solution suggestions
  */
 
 class AIService {
   constructor() {
-    // Initialize HuggingFace client
-    this.hf = new HfInference(process.env.HUGGINGFACE_API_KEY);
+    // Initialize Google Gemini client
+    this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-    // Model configurations
-    this.embeddingModel = process.env.HF_EMBEDDING_MODEL || 'sentence-transformers/all-MiniLM-L6-v2';
-    this.classificationModel = process.env.HF_CLASSIFICATION_MODEL || 'facebook/bart-large-mnli';
-    this.textGenModel = process.env.HF_TEXT_GENERATION_MODEL || 'mistralai/Mistral-7B-Instruct-v0.2';
+    // Main model for text generation and classification
+    this.model = this.genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+    // Embedding model for semantic similarity
+    this.embeddingModel = this.genAI.getGenerativeModel({ model: 'text-embedding-004' });
 
     // Cache for embeddings to reduce API calls
     this.embeddingCache = new Map();
 
-    // Category and severity labels for zero-shot classification
-    this.categoryLabels = ['infrastructure issue', 'application bug', 'security incident', 'database problem', 'general support request'];
-    this.severityLabels = ['critical emergency', 'high priority', 'medium priority', 'low priority'];
+    // Category and severity labels for classification
+    this.categoryLabels = ['infrastructure', 'application', 'security', 'database', 'other'];
+    this.severityLabels = ['critical', 'high', 'medium', 'low'];
 
-    console.log('[AIService] Initialized with HuggingFace API');
+    console.log('[AIService] Initialized with Google Gemini API');
   }
 
   /**
-   * Generate semantic embeddings using HuggingFace Sentence Transformers
+   * Generate semantic embeddings using Google Gemini
    * @param {string} text - Text to embed
-   * @returns {Promise<number[]>} - 384-dimensional embedding vector
+   * @returns {Promise<number[]>} - Embedding vector
    */
   async generateEmbedding(text) {
     try {
@@ -43,19 +44,17 @@ class AIService {
         return this.embeddingCache.get(cacheKey);
       }
 
-      const result = await this.hf.featureExtraction({
-        model: this.embeddingModel,
-        inputs: text,
-      });
+      const result = await this.embeddingModel.embedContent(text);
+      const embedding = result.embedding.values;
 
       // Cache the result
       if (this.embeddingCache.size > 1000) {
         // Clear cache if too large
         this.embeddingCache.clear();
       }
-      this.embeddingCache.set(cacheKey, result);
+      this.embeddingCache.set(cacheKey, embedding);
 
-      return result;
+      return embedding;
     } catch (error) {
       console.warn('[AIService] Embedding generation failed:', error.message);
       // Fallback to simple embedding
@@ -64,46 +63,36 @@ class AIService {
   }
 
   /**
-   * Zero-shot classification for incident category
+   * Classify incident category using Gemini
    * @param {string} text - Incident text
    * @returns {Promise<{category: string, confidence: number}>}
    */
   async classifyCategory(text) {
     try {
-      const result = await this.hf.zeroShotClassification({
-        model: this.classificationModel,
-        inputs: text,
-        parameters: {
-          candidate_labels: this.categoryLabels,
-        },
-      });
+      const prompt = `You are an IT incident classifier. Based on the following incident description, classify it into exactly ONE of these categories:
+- infrastructure (server, network, hardware issues)
+- application (software bugs, app errors, UI issues)
+- security (breaches, vulnerabilities, attacks)
+- database (data issues, queries, backups)
+- other (general support requests)
 
-      const categoryMap = {
-        'infrastructure issue': 'infrastructure',
-        'application bug': 'application',
-        'security incident': 'security',
-        'database problem': 'database',
-        'general support request': 'other',
-      };
+Incident: "${text}"
 
-      // Handle both array and object response formats
-      const data = Array.isArray(result) ? result[0] : result;
+Respond with ONLY a JSON object in this format (no markdown, no code blocks):
+{"category": "the_category", "confidence": 0.85}
 
-      if (!data || !data.labels || !data.scores) {
-        console.warn('[AIService] Invalid classification response, using fallback');
-        return this._classifyFallback(text);
-      }
+The confidence should be between 0 and 1.`;
 
-      const topLabel = data.labels[0];
-      const topScore = data.scores[0];
+      const result = await this.model.generateContent(prompt);
+      const response = result.response.text().trim();
+
+      // Parse JSON response
+      const cleanResponse = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const parsed = JSON.parse(cleanResponse);
 
       return {
-        category: categoryMap[topLabel] || 'other',
-        confidence: topScore,
-        allScores: data.labels.map((label, i) => ({
-          label: categoryMap[label] || label,
-          score: data.scores[i],
-        })),
+        category: parsed.category || 'other',
+        confidence: parsed.confidence || 0.7,
       };
     } catch (error) {
       console.warn('[AIService] Category classification failed:', error.message);
@@ -111,43 +100,36 @@ class AIService {
     }
   }
 
-
   /**
-   * Zero-shot classification for incident severity
+   * Classify incident severity using Gemini
    * @param {string} text - Incident text
    * @returns {Promise<{severity: string, confidence: number}>}
    */
   async classifySeverity(text) {
     try {
-      const result = await this.hf.zeroShotClassification({
-        model: this.classificationModel,
-        inputs: text,
-        parameters: {
-          candidate_labels: this.severityLabels,
-        },
-      });
+      const prompt = `You are an IT incident severity analyzer. Based on the following incident description, classify its severity into exactly ONE of these levels:
+- critical (system down, security breach, data loss, affects many users)
+- high (major functionality broken, significant impact)
+- medium (partial issues, moderate impact)
+- low (minor issues, minimal impact)
 
-      const severityMap = {
-        'critical emergency': 'critical',
-        'high priority': 'high',
-        'medium priority': 'medium',
-        'low priority': 'low',
-      };
+Incident: "${text}"
 
-      // Handle both array and object response formats
-      const data = Array.isArray(result) ? result[0] : result;
+Respond with ONLY a JSON object in this format (no markdown, no code blocks):
+{"severity": "the_severity", "confidence": 0.85}
 
-      if (!data || !data.labels || !data.scores) {
-        console.warn('[AIService] Invalid severity response, using fallback');
-        return this._classifySeverityFallback(text);
-      }
+The confidence should be between 0 and 1.`;
 
-      const topLabel = data.labels[0];
-      const topScore = data.scores[0];
+      const result = await this.model.generateContent(prompt);
+      const response = result.response.text().trim();
+
+      // Parse JSON response
+      const cleanResponse = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const parsed = JSON.parse(cleanResponse);
 
       return {
-        severity: severityMap[topLabel] || 'medium',
-        confidence: topScore,
+        severity: parsed.severity || 'medium',
+        confidence: parsed.confidence || 0.7,
       };
     } catch (error) {
       console.warn('[AIService] Severity classification failed:', error.message);
@@ -156,7 +138,7 @@ class AIService {
   }
 
   /**
-   * Generate AI-powered solution suggestions using LLM
+   * Generate AI-powered solution suggestions using Gemini
    * @param {object} incidentData - Incident information
    * @returns {Promise<string[]>} - Array of suggested solutions
    */
@@ -164,30 +146,27 @@ class AIService {
     try {
       const { title, description, category } = incidentData;
 
-      const prompt = `<s>[INST] You are an IT support expert. Based on the following incident, provide 3 concise, actionable solutions.
+      const prompt = `You are an expert IT support specialist. Based on the following incident, provide exactly 3 concise, actionable solutions.
 
 Incident Category: ${category || 'General'}
 Title: ${title}
 Description: ${description}
 
-Provide exactly 3 numbered solutions (1., 2., 3.) that are specific and actionable. Keep each solution under 100 words. [/INST]</s>`;
+Provide exactly 3 numbered solutions (1., 2., 3.) that are specific and actionable. Keep each solution under 100 words.
 
-      const result = await this.hf.textGeneration({
-        model: this.textGenModel,
-        inputs: prompt,
-        parameters: {
-          max_new_tokens: 500,
-          temperature: 0.7,
-          top_p: 0.9,
-          do_sample: true,
-        },
-      });
+Respond with ONLY a JSON array of strings (no markdown, no code blocks):
+["solution 1", "solution 2", "solution 3"]`;
 
-      // Parse the generated text into solutions
-      const generatedText = result.generated_text || '';
-      const solutions = this._parseSolutions(generatedText);
+      const result = await this.model.generateContent(prompt);
+      const response = result.response.text().trim();
 
-      return solutions.length > 0 ? solutions : this._getDefaultSolutions(category);
+      // Parse JSON response
+      const cleanResponse = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const solutions = JSON.parse(cleanResponse);
+
+      return Array.isArray(solutions) && solutions.length > 0
+        ? solutions.slice(0, 3)
+        : this._getDefaultSolutions(category);
     } catch (error) {
       console.warn('[AIService] Solution generation failed:', error.message);
       return this._getDefaultSolutions(incidentData.category);
@@ -201,22 +180,16 @@ Provide exactly 3 numbered solutions (1., 2., 3.) that are specific and actionab
    */
   async summarizeIncident(text) {
     try {
-      const prompt = `<s>[INST] Summarize this IT incident in one sentence (max 50 words):
+      const prompt = `Summarize this IT incident in one sentence (maximum 50 words):
 
 ${text}
 
-Summary: [/INST]</s>`;
+Respond with ONLY the summary text, no quotes or formatting.`;
 
-      const result = await this.hf.textGeneration({
-        model: this.textGenModel,
-        inputs: prompt,
-        parameters: {
-          max_new_tokens: 100,
-          temperature: 0.3,
-        },
-      });
+      const result = await this.model.generateContent(prompt);
+      const summary = result.response.text().trim();
 
-      return result.generated_text?.trim() || text.substring(0, 200);
+      return summary || text.substring(0, 200);
     } catch (error) {
       console.warn('[AIService] Summarization failed:', error.message);
       return text.substring(0, 200) + '...';
@@ -612,23 +585,6 @@ Summary: [/INST]</s>`;
   }
 
   /**
-   * Parse LLM output into solutions array
-   */
-  _parseSolutions(text) {
-    const solutions = [];
-    const lines = text.split('\n');
-
-    for (const line of lines) {
-      const match = line.match(/^\d+\.\s*(.+)/);
-      if (match && match[1].trim().length > 10) {
-        solutions.push(match[1].trim());
-      }
-    }
-
-    return solutions.slice(0, 3);
-  }
-
-  /**
    * Get default solutions based on category
    */
   _getDefaultSolutions(category) {
@@ -663,13 +619,13 @@ Summary: [/INST]</s>`;
   }
 
   /**
-   * Fallback embedding generation (when HF API fails)
+   * Fallback embedding generation (when Gemini API fails)
    */
   _generateFallbackEmbedding(text) {
     const vector = [];
     const normalized = text.toLowerCase().split(/\s+/).slice(0, 50);
 
-    for (let i = 0; i < 384; i++) {
+    for (let i = 0; i < 768; i++) { // Gemini embeddings are 768-dimensional
       let sum = 0;
       for (let j = 0; j < normalized.length; j++) {
         sum += normalized[j].charCodeAt(j % normalized[j].length) || 0;

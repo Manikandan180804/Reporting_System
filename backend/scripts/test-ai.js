@@ -7,7 +7,7 @@ require('dotenv').config();
 const aiService = require('../services/aiService');
 
 async function testAIService() {
-    console.log('🧪 Testing AI Service with HuggingFace Integration\n');
+    console.log('🧪 Testing AI Service with Google Gemini Integration\n');
     console.log('='.repeat(60));
 
     // Test incident data
@@ -40,25 +40,13 @@ async function testAIService() {
         const solutions = await aiService.generateSolutionSuggestions(testIncident);
         console.log('   Generated Solutions:');
         solutions.forEach((sol, i) => {
-            console.log(`   ${i + 1}. ${sol.substring(0, 100)}...`);
+            console.log(`   ${i + 1}. ${sol.substring(0, 80)}...`);
         });
 
-        // 4. Test Anomaly Detection
-        console.log('\n🚨 4. Testing Anomaly Detection...');
-        const anomaly = await aiService.detectAnomalies(testIncident);
-        console.log('   Anomaly Score:', (anomaly.anomalyScore * 100).toFixed(1) + '%');
-        console.log('   Is Anomalous:', anomaly.isAnomaly ? '⚠️ Yes' : '✅ No');
-        if (anomaly.flags.length > 0) {
-            console.log('   Flags:');
-            anomaly.flags.forEach(flag => console.log('   -', flag));
-        }
-
-        // 5. Test Forecast
-        console.log('\n📊 5. Testing Ticket Volume Forecasting...');
-        const forecast = await aiService.forecastTicketVolume(7);
-        console.log('   7-day forecast:', forecast.forecast.join(', '));
-        console.log('   Trend:', forecast.trend);
-        console.log('   Confidence:', Math.round(forecast.confidence * 100) + '%');
+        // 4. Test Summarization
+        console.log('\n📝 4. Testing AI Summarization...');
+        const summary = await aiService.summarizeIncident(testIncident.description);
+        console.log('   Summary:', summary.substring(0, 100));
 
         console.log('\n' + '='.repeat(60));
         console.log('✅ All AI Service tests completed successfully!\n');

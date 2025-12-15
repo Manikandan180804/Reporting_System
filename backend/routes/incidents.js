@@ -49,7 +49,7 @@ router.post('/', protect, async (req, res) => {
     };
 
     try {
-      // 1. AI-powered triage prediction (uses HuggingFace zero-shot classification)
+      // 1. AI-powered triage prediction (uses Gemini AI classification)
       const triageResult = await withTimeout(aiService.predictTriage({ title, description }));
       aiTriageData = {
         predictedCategory: triageResult.predictedCategory,

@@ -17,12 +17,6 @@ services:
         generateValue: true
       - key: CORS_ORIGIN
         value: https://issueflow-frontend.onrender.com
-      # HuggingFace AI Configuration
-      - key: HUGGINGFACE_API_KEY
-        sync: false  # Set this in Render dashboard
-      - key: HF_EMBEDDING_MODEL
-        value: sentence-transformers/all-MiniLM-L6-v2
-      - key: HF_CLASSIFICATION_MODEL
-        value: facebook/bart-large-mnli
-      - key: HF_TEXT_GENERATION_MODEL
-        value: mistralai/Mistral-7B-Instruct-v0.2
+      # Google Gemini AI Configuration
+      - key: GEMINI_API_KEY
+        sync: false  # Set this in Render dashboard with your Gemini API key
