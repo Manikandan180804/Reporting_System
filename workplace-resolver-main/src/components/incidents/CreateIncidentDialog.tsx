@@ -73,15 +73,7 @@ export default function CreateIncidentDialog({ open, onOpenChange, onSuccess }: 
       // Check duplicates
       setCheckingDuplicate(true);
       try {
-        const response = await fetch('http://localhost:5000/api/incidents/check-duplicate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          },
-          body: JSON.stringify({ title, description }),
-        });
-        const data = await response.json();
+        const data = await api.checkDuplicate(title, description);
         setDuplicateWarning(data.hasDuplicates ? data : null);
       } catch (err) {
         console.error('Duplicate check failed:', err);
@@ -92,19 +84,9 @@ export default function CreateIncidentDialog({ open, onOpenChange, onSuccess }: 
       // Get AI triage prediction
       setPredictingTriage(true);
       try {
-        const response = await fetch('http://localhost:5000/api/incidents/ai/predict-triage', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          },
-          body: JSON.stringify({ title, description }),
-        });
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.prediction) {
-            setAiPrediction(data.prediction);
-          }
+        const data = await api.predictTriage(title, description);
+        if (data.success && data.prediction) {
+          setAiPrediction(data.prediction);
         }
       } catch (err) {
         console.error('AI prediction failed:', err);
@@ -151,23 +133,12 @@ export default function CreateIncidentDialog({ open, onOpenChange, onSuccess }: 
     setLoading(true);
 
     try {
-      const response = await fetch('http://localhost:5000/api/incidents', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-        body: JSON.stringify({
-          title,
-          description,
-          category: category || undefined,
-          severity: severity || undefined,
-        }),
-      });
-
-      if (!response.ok) throw new Error('Failed to create incident');
-
-      const { incident, aiInsights } = await response.json();
+      const { incident, aiInsights } = await api.createIncidentWithInsights({
+        title,
+        description,
+        category: category || undefined,
+        severity: severity || undefined,
+      } as any);
 
       // Store suggestions for later display
       if (aiInsights?.suggestedSolutions) {
