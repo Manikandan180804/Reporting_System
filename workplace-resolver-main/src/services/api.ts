@@ -173,6 +173,11 @@ class ApiService {
     });
   }
 
+  async getAiInsights(incidentId: string): Promise<any> {
+    const res = await this.request<{ success: boolean; insights: any; aiPowered: boolean }>(`/incidents/${incidentId}/ai-insights`);
+    return res.insights;
+  }
+
   // User management endpoints
   async getUsers(): Promise<User[]> {
     return this.request<User[]>('/users');
