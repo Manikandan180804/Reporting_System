@@ -7,7 +7,7 @@ require('dotenv').config();
 const aiService = require('../services/aiService');
 
 async function testAIService() {
-    console.log('🧪 Testing AI Service with Google Gemini Integration\n');
+    console.log('🧪 Testing AI Service with HuggingFace Integration\n');
     console.log('='.repeat(60));
 
     // Test incident data

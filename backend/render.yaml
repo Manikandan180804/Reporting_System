@@ -17,6 +17,6 @@ services:
         generateValue: true
       - key: CORS_ORIGIN
         value: https://issueflow-frontend.onrender.com
-      # Google Gemini AI Configuration
-      - key: GEMINI_API_KEY
-        sync: false  # Set this in Render dashboard with your Gemini API key
+      # HuggingFace AI Configuration
+      - key: HUGGINGFACE_API_KEY
+        sync: false  # Set this in Render dashboard with your HF API key
