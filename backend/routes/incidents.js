@@ -40,8 +40,8 @@ router.post('/', protect, async (req, res) => {
     let anomalyData = {};
     let embedding = [];
 
-    // Helper to timeout AI operations (5 seconds max)
-    const withTimeout = (promise, ms = 5000) => {
+    // Helper to timeout AI operations (15 seconds max for HuggingFace free tier)
+    const withTimeout = (promise, ms = 15000) => {
       return Promise.race([
         promise,
         new Promise((_, reject) => setTimeout(() => reject(new Error('AI timeout')), ms))

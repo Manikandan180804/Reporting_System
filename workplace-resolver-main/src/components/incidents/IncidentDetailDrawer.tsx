@@ -65,17 +65,8 @@ export default function IncidentDetailDrawer({ incidentId, open, onOpenChange, o
     if (!incidentId) return;
     setLoadingInsights(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/incidents/${incidentId}/ai-insights`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setAiInsights(data.insights);
-        }
-      }
+      const insights = await api.getAiInsights(incidentId);
+      setAiInsights(insights);
     } catch (err) {
       console.error('Failed to fetch AI insights:', err);
     } finally {

@@ -69,6 +69,27 @@ class ApiService {
     });
   }
 
+  async createIncidentWithInsights(incident: Partial<Incident>): Promise<{ incident: Incident; aiInsights: any }> {
+    return this.request<{ incident: Incident; aiInsights: any }>('/incidents', {
+      method: 'POST',
+      body: JSON.stringify(incident),
+    });
+  }
+
+  async checkDuplicate(title: string, description: string): Promise<any> {
+    return this.request<any>('/incidents/check-duplicate', {
+      method: 'POST',
+      body: JSON.stringify({ title, description }),
+    });
+  }
+
+  async predictTriage(title: string, description: string): Promise<any> {
+    return this.request<any>('/incidents/ai/predict-triage', {
+      method: 'POST',
+      body: JSON.stringify({ title, description }),
+    });
+  }
+
   async getIncidents(filters?: { status?: string; category?: string }): Promise<Incident[]> {
     const params = new URLSearchParams(filters as Record<string, string>);
     return this.request<Incident[]>(`/incidents?${params}`);
@@ -150,6 +171,11 @@ class ApiService {
     return this.request<void>(`/routing-rules/${id}`, {
       method: 'DELETE',
     });
+  }
+
+  async getAiInsights(incidentId: string): Promise<any> {
+    const res = await this.request<{ success: boolean; insights: any; aiPowered: boolean }>(`/incidents/${incidentId}/ai-insights`);
+    return res.insights;
   }
 
   // User management endpoints
